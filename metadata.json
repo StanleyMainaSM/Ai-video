@@ -1,0 +1,6 @@
+{
+  "name": "CineFace AI Studio",
+  "description": "Production-grade AI video creation studio for photorealistic avatars, viral content analysis, and script-to-video generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
