@@ -6,28 +6,40 @@ import { VeoGeminiVideoProvider } from './veoProvider';
 import { ProviderInfo } from '../../src/types';
 
 export class VideoProviderManager {
-  private providers: Map<string, IVideoGenerationProvider> = new Map();
+  private providers = new Map<string, IVideoGenerationProvider>();
   private activeProviderId: string = 'mock';
 
   constructor() {
-    const mock = new MockDevelopmentVideoProvider();
+    // 1. Dedicated Talking-Avatar Engine (Production Milestone)
     const heygen = new HeyGenVideoProvider();
-    const runway = new RunwayVideoProvider();
-    const veo = new VeoGeminiVideoProvider();
-
-    this.providers.set(mock.id, mock);
     this.providers.set(heygen.id, heygen);
-    this.providers.set(runway.id, runway);
+
+    // 2. Generative Video & Cinematic B-Roll Diffusion Engines
+    const veo = new VeoGeminiVideoProvider();
     this.providers.set(veo.id, veo);
 
-    // Determine initial active provider from environment variable
+    const runway = new RunwayVideoProvider();
+    this.providers.set(runway.id, runway);
+
+    // 3. Development Demo Sandbox (Offline Simulation)
+    const mock = new MockDevelopmentVideoProvider();
+    this.providers.set(mock.id, mock);
+
+    // Resolution priority:
+    // Respect AI_VIDEO_PROVIDER only if the provider is actually configured.
+    // Never auto-activate an unconfigured provider.
     const configuredEnvProvider = (process.env.AI_VIDEO_PROVIDER || '').toLowerCase().trim();
     if (configuredEnvProvider && this.providers.has(configuredEnvProvider)) {
-      this.activeProviderId = configuredEnvProvider;
+      const p = this.providers.get(configuredEnvProvider)!;
+      if (p.isConfigured()) {
+        this.activeProviderId = configuredEnvProvider;
+      } else {
+        console.warn(`[VideoProviderManager] AI_VIDEO_PROVIDER="${configuredEnvProvider}" requested, but credentials are missing. Defaulting to Development Demo ("mock").`);
+        this.activeProviderId = 'mock';
+      }
     } else if (heygen.isConfigured()) {
+      // Auto-prefer real HeyGen if configured
       this.activeProviderId = 'heygen';
-    } else if (runway.isConfigured()) {
-      this.activeProviderId = 'runway';
     } else {
       this.activeProviderId = 'mock';
     }
@@ -37,12 +49,21 @@ export class VideoProviderManager {
     return this.providers.get(this.activeProviderId) || this.providers.get('mock')!;
   }
 
-  public setActiveProvider(id: string): boolean {
-    if (this.providers.has(id)) {
-      this.activeProviderId = id;
-      return true;
+  public setActiveProvider(providerId: string): { success: boolean; error?: string } {
+    if (!this.providers.has(providerId)) {
+      return { success: false, error: `Provider "${providerId}" does not exist.` };
     }
-    return false;
+
+    const provider = this.providers.get(providerId)!;
+    if (!provider.isConfigured() && provider.id !== 'mock') {
+      return {
+        success: false,
+        error: `Cannot activate "${provider.name}": ${provider.configurationKeyName} is not set in environment variables.`,
+      };
+    }
+
+    this.activeProviderId = providerId;
+    return { success: true };
   }
 
   public getProvider(id: string): IVideoGenerationProvider | undefined {
@@ -54,11 +75,17 @@ export class VideoProviderManager {
       id: p.id,
       name: p.name,
       description: p.description,
+      category: p.category,
+      categoryLabel: p.categoryLabel,
       isConfigured: p.isConfigured(),
       isActive: p.id === this.activeProviderId,
       supportedFeatures: p.supportedFeatures,
+      capabilities: p.capabilities,
+      configurationKeyName: p.configurationKeyName,
+      configurationHelp: p.configurationHelp,
     }));
   }
 }
 
 export const providerManager = new VideoProviderManager();
+export * from './types';

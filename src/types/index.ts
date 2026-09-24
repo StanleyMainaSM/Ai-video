@@ -138,6 +138,8 @@ export interface VideoResultData {
   isMock: boolean;
   script: string;
   voiceName: string;
+  expiresAt?: string;
+  demoMessage?: string;
 }
 
 export interface ReferenceAnalysisResult {
@@ -181,11 +183,26 @@ export interface ProviderJobStatus {
   error?: string;
 }
 
+export type ProviderCategory = 'talking_avatar' | 'generative_broll' | 'demo_sandbox';
+
+export interface ProviderCapabilities {
+  talkingPhoto: boolean;
+  customScript: boolean;
+  lipSync: boolean;
+  swahiliSupport: boolean;
+  aspectRatio916: boolean;
+}
+
 export interface ProviderInfo {
   id: string;
   name: string;
   description: string;
+  category: ProviderCategory;
+  categoryLabel: string;
   isConfigured: boolean;
   isActive: boolean;
   supportedFeatures: string[];
+  capabilities: ProviderCapabilities;
+  configurationKeyName?: string;
+  configurationHelp?: string;
 }

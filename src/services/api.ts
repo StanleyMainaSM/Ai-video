@@ -7,9 +7,32 @@ import {
   VideoType,
 } from '../types';
 
+export async function fetchHealth(): Promise<{
+  status: string;
+  timestamp: string;
+  providers: {
+    geminiConfigured: boolean;
+    heygenConfigured: boolean;
+    runwayConfigured: boolean;
+    veoConfigured: boolean;
+  };
+  activeProvider: {
+    id: string;
+    name: string;
+    isConfigured: boolean;
+    isMock: boolean;
+    category: string;
+  };
+  productionReady: boolean;
+}> {
+  const res = await fetch('/api/health');
+  if (!res.ok) throw new Error('Health check failed');
+  return res.json();
+}
+
 export async function fetchProviders(): Promise<{
   providers: ProviderInfo[];
-  activeProvider: { id: string; name: string; isConfigured: boolean; description: string };
+  activeProvider: { id: string; name: string; isConfigured: boolean; description: string; isMock: boolean; category: string };
   geminiConfigured: boolean;
 }> {
   const res = await fetch('/api/video/providers');
@@ -33,7 +56,7 @@ export async function startVideoGeneration(config: VideoGenerationConfig): Promi
   jobId: string;
   status: string;
   message?: string;
-  provider: { id: string; name: string; isMock: boolean };
+  provider: { id: string; name: string; isMock: boolean; category?: string };
 }> {
   const res = await fetch('/api/video/generate', {
     method: 'POST',

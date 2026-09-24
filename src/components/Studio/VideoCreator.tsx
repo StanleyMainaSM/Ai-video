@@ -24,6 +24,8 @@ import {
   Maximize2,
   Cpu,
   ArrowRight,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   VideoType,
@@ -63,7 +65,7 @@ interface VideoCreatorProps {
   initialAudience?: string;
   onOpenViralAnalyzer: () => void;
   onOpenProviderSettings: () => void;
-  activeProvider?: { id: string; name: string; isConfigured: boolean; description: string };
+  activeProvider?: { id: string; name: string; isConfigured: boolean; description: string; isMock?: boolean; category?: string };
 }
 
 export const VideoCreator: React.FC<VideoCreatorProps> = ({
@@ -129,10 +131,17 @@ export const VideoCreator: React.FC<VideoCreatorProps> = ({
   const [videoResult, setVideoResult] = useState<VideoResultData | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Result Player State
+  // Result Player State & Simulation
   const videoPlayerRef = useRef<HTMLVideoElement>(null);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
   const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoIsBuffering, setVideoIsBuffering] = useState(false);
+  const [videoHasError, setVideoHasError] = useState(false);
+  const [videoMuted, setVideoMuted] = useState(false);
+  const [isPlayingScriptAudio, setIsPlayingScriptAudio] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [showLayoutTestFrame, setShowLayoutTestFrame] = useState(false);
 
   // Word count and duration calculation
   const wordCount = script.trim() ? script.trim().split(/\s+/).length : 0;
@@ -373,22 +382,87 @@ export const VideoCreator: React.FC<VideoCreatorProps> = ({
 
   // Reset to create another video
   const handleCreateAnother = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     setVideoResult(null);
     setJobStatus(null);
     setIsGenerating(false);
     setGenerationError(null);
+    setIsPlayingVideo(false);
+    setIsPlayingScriptAudio(false);
+    setVideoHasError(false);
+    setShowLayoutTestFrame(false);
   };
 
   // Video Player Controls
   const togglePlayVideo = () => {
     if (!videoPlayerRef.current) return;
     if (videoPlayerRef.current.paused) {
-      videoPlayerRef.current.play();
+      videoPlayerRef.current.play().catch(() => setVideoHasError(true));
       setIsPlayingVideo(true);
     } else {
       videoPlayerRef.current.pause();
       setIsPlayingVideo(false);
     }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    setVideoCurrentTime(time);
+    if (videoPlayerRef.current) {
+      videoPlayerRef.current.currentTime = time;
+    }
+  };
+
+  const toggleMute = () => {
+    if (!videoPlayerRef.current) return;
+    videoPlayerRef.current.muted = !videoMuted;
+    setVideoMuted(!videoMuted);
+  };
+
+  const toggleFullscreen = () => {
+    if (!videoPlayerRef.current) return;
+    if (videoPlayerRef.current.requestFullscreen) {
+      videoPlayerRef.current.requestFullscreen();
+    }
+  };
+
+  const togglePlayScriptAudio = () => {
+    if (!('speechSynthesis' in window)) {
+      alert('Speech synthesis is not supported in this browser.');
+      return;
+    }
+    if (isPlayingScriptAudio) {
+      window.speechSynthesis.cancel();
+      setIsPlayingScriptAudio(false);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const voiceObj = VOICE_OPTIONS.find((v) => v.id === selectedVoiceId);
+    const utterance = new SpeechSynthesisUtterance(script);
+    utterance.rate = speakingSpeed;
+    utterance.pitch = voicePitch;
+    utterance.lang = voiceObj?.languageCode || 'en-US';
+
+    utterance.onend = () => setIsPlayingScriptAudio(false);
+    utterance.onerror = () => setIsPlayingScriptAudio(false);
+
+    setIsPlayingScriptAudio(true);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleCopyScript = () => {
+    navigator.clipboard.writeText(script);
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 2000);
+  };
+
+  const formatSeconds = (sec: number) => {
+    const mins = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${mins}:${s < 10 ? '0' : ''}${s}`;
   };
 
   return (
@@ -1034,7 +1108,7 @@ export const VideoCreator: React.FC<VideoCreatorProps> = ({
               </span>
             </div>
 
-            {/* Video Preview Frame / Video Player */}
+            {/* Video Preview Frame / Video Player / Development Demo Frame */}
             <div
               className={`relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center transition-all duration-300 ${
                 aspectRatio === '9:16'
@@ -1045,52 +1119,202 @@ export const VideoCreator: React.FC<VideoCreatorProps> = ({
               }`}
             >
               {videoResult ? (
-                // Completed Video Player
-                <div className="relative w-full h-full bg-black flex items-center justify-center">
-                  <video
-                    ref={videoPlayerRef}
-                    src={videoResult.videoUrl}
-                    poster={videoResult.thumbnailUrl}
-                    playsInline
-                    loop
-                    onTimeUpdate={() => {
-                      if (videoPlayerRef.current) {
-                        setVideoCurrentTime(videoPlayerRef.current.currentTime);
-                      }
-                    }}
-                    onEnded={() => setIsPlayingVideo(false)}
-                    className="w-full h-full object-cover"
-                  />
+                videoResult.isMock ? (
+                  // ========================================================
+                  // 1. DEVELOPMENT DEMO FRAME (TRUTHFUL & HONEST RESULT)
+                  // ========================================================
+                  <div className="relative w-full h-full bg-slate-950 flex flex-col items-center justify-center p-3 overflow-hidden">
+                    <div className="relative w-full h-full rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex items-center justify-center">
+                      <img
+                        src={
+                          avatarMode === 'upload' && uploadedPhoto
+                            ? uploadedPhoto
+                            : CHARACTER_PRESETS.find((c) => c.id === selectedPresetId)?.avatarUrl ||
+                              CHARACTER_PRESETS[0].avatarUrl
+                        }
+                        alt="Demo Presenter"
+                        className="w-full h-full object-cover object-top opacity-85"
+                      />
 
-                  {/* Overlaid Captions Rendering */}
-                  {captionsEnabled && (
-                    <div className="absolute bottom-12 inset-x-4 text-center pointer-events-none">
-                      <div className="inline-block bg-black/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/10 shadow-xl">
-                        <span
-                          className={`text-xs sm:text-sm font-extrabold drop-shadow ${
-                            captionStyle === 'bold_social'
-                              ? 'text-amber-300 uppercase tracking-wide'
-                              : captionStyle === 'karaoke_highlight'
-                              ? 'text-emerald-300'
-                              : 'text-white'
-                          }`}
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-black/60 pointer-events-none" />
+
+                      {/* Prominent Truthful Watermark Ribbon */}
+                      <div className="absolute top-3 inset-x-3 text-center">
+                        <div className="inline-block bg-amber-500 text-black text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full shadow-lg">
+                          Development Demo · Real AI Video Not Connected
+                        </div>
+                      </div>
+
+                      {/* Center Audio Simulation Player */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+                        <button
+                          onClick={togglePlayScriptAudio}
+                          className="w-16 h-16 rounded-full bg-amber-500 hover:bg-amber-400 text-black flex items-center justify-center shadow-2xl transition-transform hover:scale-105 active:scale-95 group mb-3"
+                          title="Simulate vocal speech audio"
                         >
-                          "{script.slice(0, 75)}..."
-                        </span>
+                          {isPlayingScriptAudio ? (
+                            <Pause className="w-7 h-7" />
+                          ) : (
+                            <Volume2 className="w-7 h-7 ml-0.5" />
+                          )}
+                        </button>
+
+                        <div className="text-xs font-bold text-white drop-shadow">
+                          {isPlayingScriptAudio ? 'Speaking Script Audio...' : 'Click to Play Spoken Audio'}
+                        </div>
+                        <div className="text-[10px] text-amber-200/90 mt-0.5 drop-shadow font-medium">
+                          {VOICE_OPTIONS.find((v) => v.id === selectedVoiceId)?.name} · {speakingSpeed}x speed
+                        </div>
+
+                        {/* Animated waveform visualizer during speech */}
+                        {isPlayingScriptAudio && (
+                          <div className="flex items-center gap-1 mt-3">
+                            <span className="w-1 h-3.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-1 h-6 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-1 h-4.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            <span className="w-1 h-7 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
+                            <span className="w-1 h-3 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '200ms' }} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Captions Preview Bar */}
+                      {captionsEnabled && (
+                        <div className="absolute bottom-3 inset-x-3 text-center pointer-events-none">
+                          <div className="inline-block bg-black/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 shadow-lg">
+                            <span className="text-[11px] font-bold text-amber-300">
+                              "{script.slice(0, 52)}..."
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  // ========================================================
+                  // 2. PRODUCTION VIDEO PLAYER (REAL AI VIDEO RESULT)
+                  // ========================================================
+                  <div className="relative w-full h-full bg-black flex items-center justify-center group">
+                    <video
+                      ref={videoPlayerRef}
+                      src={videoResult.videoUrl}
+                      poster={videoResult.thumbnailUrl}
+                      playsInline
+                      loop
+                      onTimeUpdate={() => {
+                        if (videoPlayerRef.current) {
+                          setVideoCurrentTime(videoPlayerRef.current.currentTime);
+                        }
+                      }}
+                      onLoadedMetadata={() => {
+                        if (videoPlayerRef.current) {
+                          setVideoDuration(videoPlayerRef.current.duration);
+                        }
+                      }}
+                      onWaiting={() => setVideoIsBuffering(true)}
+                      onPlaying={() => {
+                        setVideoIsBuffering(false);
+                        setIsPlayingVideo(true);
+                      }}
+                      onPause={() => setIsPlayingVideo(false)}
+                      onError={() => {
+                        setVideoHasError(true);
+                        setVideoIsBuffering(false);
+                      }}
+                      onEnded={() => setIsPlayingVideo(false)}
+                      className="w-full h-full object-cover"
+                    />
+
+                    {/* Buffering Indicator */}
+                    {videoIsBuffering && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
+                        <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
+                      </div>
+                    )}
+
+                    {/* Error fallback */}
+                    {videoHasError && (
+                      <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-4 text-center">
+                        <AlertTriangle className="w-8 h-8 text-amber-400 mb-2" />
+                        <div className="text-xs font-bold text-white">Stream Playback Notice</div>
+                        <p className="text-[11px] text-slate-400 mt-1 max-w-xs">
+                          Direct video streaming is blocked or URL expired. You can download the video directly below.
+                        </p>
+                        <a
+                          href={videoResult.videoUrl}
+                          download="cineface-video.mp4"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold"
+                        >
+                          Direct Download
+                        </a>
+                      </div>
+                    )}
+
+                    {/* Overlaid Captions Rendering */}
+                    {captionsEnabled && !videoHasError && (
+                      <div className="absolute bottom-16 inset-x-4 text-center pointer-events-none">
+                        <div className="inline-block bg-black/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/10 shadow-xl">
+                          <span
+                            className={`text-xs sm:text-sm font-extrabold drop-shadow ${
+                              captionStyle === 'bold_social'
+                                ? 'text-amber-300 uppercase tracking-wide'
+                                : captionStyle === 'karaoke_highlight'
+                                ? 'text-emerald-300'
+                                : 'text-white'
+                            }`}
+                          >
+                            "{script.slice(0, 75)}..."
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Custom Player Controls Bar */}
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-3 flex flex-col gap-1.5 transition-opacity">
+                      {/* Timeline Scrubber */}
+                      <input
+                        type="range"
+                        min="0"
+                        max={videoDuration || videoResult.durationSeconds || 10}
+                        step="0.1"
+                        value={videoCurrentTime}
+                        onChange={handleSeek}
+                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                      />
+
+                      <div className="flex items-center justify-between text-xs text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={togglePlayVideo}
+                            className="p-1 hover:text-white transition-colors"
+                          >
+                            {isPlayingVideo ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                          </button>
+                          <span className="font-mono text-[10px] text-slate-400">
+                            {formatSeconds(videoCurrentTime)} / {formatSeconds(videoDuration || videoResult.durationSeconds)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={toggleMute}
+                            className="p-1 hover:text-white transition-colors"
+                          >
+                            {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={toggleFullscreen}
+                            className="p-1 hover:text-white transition-colors"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  )}
-
-                  {/* Play / Pause Overlay Button */}
-                  <button
-                    onClick={togglePlayVideo}
-                    className="absolute inset-0 w-full h-full flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors group"
-                  >
-                    <div className="w-14 h-14 rounded-full bg-indigo-600/90 group-hover:bg-indigo-600 text-white flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
-                      {isPlayingVideo ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
-                    </div>
-                  </button>
-                </div>
+                  </div>
+                )
               ) : (
                 // Live Stage Setup Preview
                 <div className="relative w-full h-full">
@@ -1174,71 +1398,169 @@ export const VideoCreator: React.FC<VideoCreatorProps> = ({
 
             {/* Video Result Actions (STEP 11) */}
             {videoResult ? (
-              <div className="space-y-3 pt-2">
-                {/* Result Specs */}
-                <div className="grid grid-cols-3 gap-2 text-center text-xs p-3 rounded-xl bg-slate-950 border border-slate-800">
-                  <div>
-                    <span className="text-slate-500 text-[10px] block">Dimensions</span>
-                    <span className="font-mono font-semibold text-slate-200">
-                      {videoResult.width}x{videoResult.height}
-                    </span>
+              videoResult.isMock ? (
+                // Development Demo Result Card
+                <div className="space-y-3 pt-2">
+                  <div className="p-3.5 rounded-xl bg-amber-950/60 border border-amber-800/80 text-xs space-y-2">
+                    <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>Development Demo — Real AI video generation is not connected</span>
+                    </div>
+                    <p className="text-[11px] text-amber-100/90 leading-relaxed">
+                      This sandbox verified your photo likeness framing, aspect ratio ({videoResult.aspectRatio}), duration timing (~{videoResult.durationSeconds}s), and vocal cadence without consuming external API credits. No external video was generated from your photo.
+                    </p>
+                    <div className="pt-1 flex items-center justify-between">
+                      <span className="text-[10px] text-amber-300/80">Want real photorealistic lip-sync?</span>
+                      <button
+                        onClick={onOpenProviderSettings}
+                        className="text-[11px] font-bold text-white bg-amber-600 hover:bg-amber-500 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                      >
+                        <span>Connect HeyGen</span>
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-slate-500 text-[10px] block">Duration</span>
-                    <span className="font-mono font-semibold text-slate-200">
-                      {videoResult.durationSeconds}s
-                    </span>
+
+                  {/* Demo Specs */}
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs p-3 rounded-xl bg-slate-950 border border-slate-800">
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">Aspect Ratio</span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {videoResult.aspectRatio}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">Simulated Time</span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {videoResult.durationSeconds}s
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">Voice Preset</span>
+                      <span className="font-semibold text-slate-200 truncate block">
+                        {VOICE_OPTIONS.find((v) => v.id === selectedVoiceId)?.name.split(' ')[0] || 'Default'}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-slate-500 text-[10px] block">File Size</span>
-                    <span className="font-mono font-semibold text-slate-200">
-                      {videoResult.fileSizeEstimate}
-                    </span>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={onOpenProviderSettings}
+                      className="flex-1 py-3 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-colors"
+                    >
+                      <Cpu className="w-4 h-4" />
+                      <span>Configure Real Provider (HeyGen)</span>
+                    </button>
+
+                    <button
+                      onClick={handleCopyScript}
+                      className="py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors flex items-center gap-1"
+                      title="Copy script text"
+                    >
+                      {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedScript ? 'Copied' : 'Script'}</span>
+                    </button>
+
+                    <button
+                      onClick={handleCreateAnother}
+                      className="py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors flex items-center gap-1"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset</span>
+                    </button>
                   </div>
                 </div>
+              ) : (
+                // Production Real Video Result Card
+                <div className="space-y-3 pt-2">
+                  {/* Result Specs */}
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs p-3 rounded-xl bg-slate-950 border border-slate-800">
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">Dimensions</span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {videoResult.width}x{videoResult.height}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">Duration</span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {videoResult.durationSeconds}s
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">File Size</span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {videoResult.fileSizeEstimate}
+                      </span>
+                    </div>
+                  </div>
 
-                {/* Provider Note */}
-                <div className="text-[11px] text-slate-400 text-center">
-                  Rendered by <strong>{videoResult.provider}</strong>
-                  {videoResult.isMock && ' · Offline Sandbox'}
+                  {/* Provider Note & Expiration Warning */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                    <div>
+                      Rendered by <strong className="text-white">{videoResult.provider}</strong>
+                    </div>
+                    <div className="text-[10px] text-amber-300/90 flex items-center gap-1">
+                      <Clock className="w-3 h-3 shrink-0" />
+                      <span>Provider download link: Download your MP4 immediately as cloud links expire after 24 hours.</span>
+                    </div>
+                  </div>
+
+                  {/* Primary Result Buttons */}
+                  <div className="flex items-center gap-3">
+                    <a
+                      href={videoResult.videoUrl}
+                      download={`cineface-video-${Date.now()}.mp4`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-transform hover:scale-[1.02]"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Video (MP4)</span>
+                    </a>
+
+                    <button
+                      onClick={handleCreateAnother}
+                      className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Create Another</span>
+                    </button>
+                  </div>
                 </div>
-
-                {/* Primary Result Buttons */}
-                <div className="flex items-center gap-3">
-                  <a
-                    href={videoResult.videoUrl}
-                    download={`cineface-video-${Date.now()}.mp4`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-transform hover:scale-[1.02]"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download Video</span>
-                  </a>
-
-                  <button
-                    onClick={handleCreateAnother}
-                    className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors flex items-center gap-1.5"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Create Another</span>
-                  </button>
-                </div>
-              </div>
+              )
             ) : (
               // STEP 10: Generate Video CTA
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button
                   onClick={handleGenerateVideo}
                   disabled={isGenerating}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-xl shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+                  className={`w-full py-4 px-6 rounded-2xl text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 ${
+                    activeProvider?.id === 'mock' || !activeProvider?.isConfigured
+                      ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30 hover:shadow-amber-600/50'
+                      : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30 hover:shadow-indigo-600/50'
+                  }`}
                 >
                   <Video className="w-5 h-5" />
-                  <span>Generate Video</span>
+                  <span>
+                    {activeProvider?.id === 'mock' || !activeProvider?.isConfigured
+                      ? 'Run Development Demo (Simulation)'
+                      : `Generate Photorealistic Avatar (${activeProvider?.name.split(' ')[0] || 'HeyGen'})`}
+                  </span>
                 </button>
 
-                <div className="mt-2 text-center text-[11px] text-slate-500">
-                  Photorealistic avatar synthesis with lifelike lip-sync and 60fps face kinematics.
+                <div className="text-center text-[11px] text-slate-400">
+                  {activeProvider?.id === 'mock' || !activeProvider?.isConfigured ? (
+                    <div className="space-y-0.5">
+                      <span className="font-semibold text-amber-300">Development Mode:</span>{' '}
+                      <span>Connect HeyGen in Provider Settings to generate real AI videos from your photo.</span>
+                    </div>
+                  ) : (
+                    <div>
+                      Photorealistic avatar synthesis with lifelike lip-sync and 60fps face kinematics via HeyGen.
+                    </div>
+                  )}
                 </div>
               </div>
             )}

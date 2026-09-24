@@ -4,25 +4,39 @@ import { VideoGenerationConfig, VideoResultData } from '../../src/types';
 export class RunwayVideoProvider implements IVideoGenerationProvider {
   public id = 'runway';
   public name = 'Runway Gen-3 / Gen-4 Alpha';
-  public description = 'Cinematic video generation with rich lighting, temporal consistency, and camera movement.';
+  public description = 'Cinematic video generation with rich lighting and camera motion. NOTE: Runway is an atmospheric diffusion model; it produces ambient scenes/B-roll and does NOT support lip-synchronized talking avatars from uploaded photos.';
+  public category = 'generative_broll' as const;
+  public categoryLabel = 'Generative B-Roll (Not Talking-Avatar Lip-Sync)';
+  public configurationKeyName = 'RUNWAY_API_KEY';
+  public configurationHelp = 'Obtain an API key at https://runwayml.com/ and set RUNWAY_API_KEY in your environment variables.';
+
   public supportedFeatures = [
-    'Image-to-Video Realistic Motion',
-    'Cinematic Lighting & Depth of Field',
-    'High Resolution 720p/1080p',
-    'Temporal Motion Smoothness',
+    'Cinematic Camera Movement & Depth of Field',
+    'Atmospheric Video Synthesis & Motion',
+    'High Resolution 720p/1080p Generation',
+    'Ambient B-Roll Generation',
   ];
 
+  public capabilities = {
+    talkingPhoto: false, // Honest: does not create lip-synced talking avatars
+    customScript: false,
+    lipSync: false,      // Honest: does not perform viseme mouth sync
+    swahiliSupport: false,
+    aspectRatio916: true,
+  };
+
   public isConfigured(): boolean {
-    return Boolean(process.env.RUNWAY_API_KEY && process.env.RUNWAY_API_KEY.trim().length > 0);
+    const key = process.env.RUNWAY_API_KEY;
+    return Boolean(key && key.trim().length > 0 && !key.includes('your-runway-api-key'));
   }
 
   public async generateVideo(config: VideoGenerationConfig): Promise<{ jobId: string; status: 'queued'; message?: string }> {
     const apiKey = process.env.RUNWAY_API_KEY;
-    if (!apiKey) {
-      throw new Error('RUNWAY_API_KEY environment variable is not configured.');
+    if (!apiKey || !this.isConfigured()) {
+      throw new Error('RUNWAY_API_KEY is not configured on the server.');
     }
 
-    const promptText = `Photorealistic presenter speaking naturally directly to camera. ${config.script.slice(0, 150)}. Consistent facial features, natural blinking and head movements. High quality studio lighting, sharp 8k resolution.`;
+    const promptText = `Cinematic commercial scene related to: ${config.script.slice(0, 160)}. Professional studio lighting, subtle camera motion, high production value.`;
 
     const response = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
       method: 'POST',
@@ -86,10 +100,10 @@ export class RunwayVideoProvider implements IVideoGenerationProvider {
           height: 768,
           fileSizeEstimate: '8 MB',
           generatedAt: new Date().toISOString(),
-          provider: 'Runway Gen-3 Alpha',
+          provider: 'Runway Gen-3 Alpha (Generative B-Roll)',
           isMock: false,
           script: '',
-          voiceName: 'Runway Native',
+          voiceName: 'Runway Ambient',
         };
         return { phase: 'completed', phaseLabel: 'Video Ready', progressPercent: 100, result };
       } else if (status === 'FAILED') {
@@ -117,5 +131,10 @@ export class RunwayVideoProvider implements IVideoGenerationProvider {
     } catch {
       return false;
     }
+  }
+
+  public async getResult(jobId: string): Promise<VideoResultData | null> {
+    const status = await this.getStatus(jobId);
+    return status.result || null;
   }
 }

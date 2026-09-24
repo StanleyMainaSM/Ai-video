@@ -5,21 +5,35 @@ import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
 export class VeoGeminiVideoProvider implements IVideoGenerationProvider {
   public id = 'veo';
   public name = 'Google Veo Video Engine';
-  public description = 'Google DeepMind state-of-the-art generative video model with high visual fidelity.';
+  public description = 'Google DeepMind state-of-the-art generative video diffusion model. NOTE: Veo creates cinematic scenes and visual shots; it is a text/image-to-video diffusion model and does NOT perform lip-synchronized talking avatar synthesis.';
+  public category = 'generative_broll' as const;
+  public categoryLabel = 'Generative Video Diffusion (Not Talking-Avatar Lip-Sync)';
+  public configurationKeyName = 'GEMINI_API_KEY';
+  public configurationHelp = 'Requires GEMINI_API_KEY with access to Google Veo video generation endpoints.';
+
   public supportedFeatures = [
-    'Text-to-Video & Image-to-Video',
-    '720p / 1080p Resolution',
+    'Text-to-Video & Image-to-Video Diffusion',
+    '720p Resolution Generation',
     '16:9 Landscape & 9:16 Portrait Formats',
-    'Naturalistic Camera Dynamics',
+    'Naturalistic Camera Dynamics & Physics',
   ];
 
+  public capabilities = {
+    talkingPhoto: false, // Honest: generative video, not lip-synced talking avatar
+    customScript: false,
+    lipSync: false,      // Honest: does not synthesize phoneme mouth shapes
+    swahiliSupport: false,
+    aspectRatio916: true,
+  };
+
   public isConfigured(): boolean {
-    return Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0);
+    const key = process.env.GEMINI_API_KEY;
+    return Boolean(key && key.trim().length > 0 && !key.includes('MY_GEMINI_API_KEY'));
   }
 
   public async generateVideo(config: VideoGenerationConfig): Promise<{ jobId: string; status: 'queued'; message?: string }> {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!apiKey || !this.isConfigured()) {
       throw new Error('GEMINI_API_KEY is not configured for Veo generation.');
     }
 
@@ -28,8 +42,7 @@ export class VeoGeminiVideoProvider implements IVideoGenerationProvider {
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
     });
 
-    const prompt = `Photorealistic video of a speaker delivering a message: "${config.script.slice(0, 180)}". Realistic facial micro-movements, eye contact with camera, professional lighting, cinematic crisp clarity.`;
-
+    const prompt = `Cinematic commercial video scene: "${config.script.slice(0, 180)}". Professional studio lighting, cinematic crisp clarity.`;
     const aspectRatio = config.aspectRatio === '9:16' ? '9:16' : '16:9';
 
     const operation = await ai.models.generateVideos({
@@ -45,7 +58,7 @@ export class VeoGeminiVideoProvider implements IVideoGenerationProvider {
     return {
       jobId: operation.name || `veo_${Date.now()}`,
       status: 'queued',
-      message: 'Veo generation task initiated.',
+      message: 'Veo generative video task initiated.',
     };
   }
 
@@ -77,10 +90,10 @@ export class VeoGeminiVideoProvider implements IVideoGenerationProvider {
           height: 720,
           fileSizeEstimate: '6 MB',
           generatedAt: new Date().toISOString(),
-          provider: 'Google Veo Video Engine',
+          provider: 'Google Veo Video Engine (Generative B-Roll)',
           isMock: false,
           script: '',
-          voiceName: 'Veo',
+          voiceName: 'Veo Native',
         };
         return { phase: 'completed', phaseLabel: 'Video Ready', progressPercent: 100, result };
       }
@@ -98,5 +111,10 @@ export class VeoGeminiVideoProvider implements IVideoGenerationProvider {
 
   public async cancelJob(_jobId: string): Promise<boolean> {
     return false;
+  }
+
+  public async getResult(jobId: string): Promise<VideoResultData | null> {
+    const status = await this.getStatus(jobId);
+    return status.result || null;
   }
 }

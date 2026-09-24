@@ -1,157 +1,187 @@
 import { IVideoGenerationProvider, ProviderJobStatus } from './types';
-import { VideoGenerationConfig, VideoResultData } from '../../src/types';
+import { VideoGenerationConfig, VideoResultData, AspectRatio } from '../../src/types';
 
-interface StoredJob {
-  id: string;
-  config: VideoGenerationConfig;
-  startedAt: number;
-  status: ProviderJobStatus;
+interface MockJobPayload {
+  startTime: number;
+  aspectRatio: AspectRatio;
+  duration: number;
+  uploadedPhoto?: string;
+  script: string;
+  voiceId: string;
   cancelled?: boolean;
 }
 
+// In-memory fallback map for active session cancel actions
+const activeJobs = new Map<string, MockJobPayload>();
+
 export class MockDevelopmentVideoProvider implements IVideoGenerationProvider {
   public id = 'mock';
-  public name = 'Mock Development Sandbox';
-  public description = 'Local test simulation provider for offline development without paid external API keys.';
+  public name = 'Development Demo Sandbox';
+  public description = 'Offline test simulation provider for testing UI, script timing, and workflow without consuming commercial API keys.';
+  public category = 'demo_sandbox' as const;
+  public categoryLabel = 'Development Sandbox (Simulation)';
+  public configurationKeyName = 'AI_VIDEO_PROVIDER=mock';
+  public configurationHelp = 'Always available for zero-cost development and workflow verification.';
+
   public supportedFeatures = [
-    'Uploaded Photo Avatars',
-    'AI Presets',
-    'Custom Character Prompt',
-    'Multi-language Voices (inc. Swahili)',
-    'Aspect Ratios (9:16, 16:9, 1:1)',
-    'Dynamic Captions',
-    'Realistic Generation Pipeline States',
+    'Offline Workflow & Step Navigation Testing',
+    'Spoken Script Cadence & Duration Verification',
+    'Uploaded Photo Aspect-Ratio Preview (9:16, 16:9, 1:1)',
+    'Biometric Consent & Legal Safeguard Enforcement',
+    'Stateless Pipeline Simulation (Vercel Serverless Ready)',
   ];
 
-  private jobs = new Map<string, StoredJob>();
+  public capabilities = {
+    talkingPhoto: false, // Honest: does not synthesize live facial animation
+    customScript: true,
+    lipSync: false,      // Honest: does not synthesize lip synchronization
+    swahiliSupport: true,
+    aspectRatio916: true,
+  };
 
   public isConfigured(): boolean {
-    return true; // Always available as testing fallback
+    return true; // Always available as local development sandbox
   }
 
   public async generateVideo(config: VideoGenerationConfig): Promise<{ jobId: string; status: 'queued'; message?: string }> {
-    const jobId = 'mock_job_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const now = Date.now();
+    const duration = Math.max(5, config.desiredDurationSeconds || 25);
+    const sanitizedAspect = config.aspectRatio || '9:16';
 
-    const initialStatus: ProviderJobStatus = {
-      phase: 'queued',
-      phaseLabel: 'Queued in generation queue...',
-      progressPercent: 5,
-      details: 'Allocating rendering compute in development sandbox...',
-    };
+    // Stateless jobId encoding: mock_demo_<timestamp>_<aspectRatio>_<duration>
+    const jobId = `mock_demo_${now}_${sanitizedAspect.replace(':', 'x')}_${duration}s_${Math.random().toString(36).substring(2, 6)}`;
 
-    const job: StoredJob = {
-      id: jobId,
-      config,
-      startedAt: Date.now(),
-      status: initialStatus,
-    };
-
-    this.jobs.set(jobId, job);
-
-    // Simulate progressive asynchronous rendering pipeline
-    this.runMockPipeline(jobId);
+    // Store ephemeral payload for this session
+    activeJobs.set(jobId, {
+      startTime: now,
+      aspectRatio: sanitizedAspect,
+      duration,
+      uploadedPhoto: config.uploadedPhoto,
+      script: config.script,
+      voiceId: config.voiceId,
+      cancelled: false,
+    });
 
     return {
       jobId,
       status: 'queued',
-      message: 'Video job queued in development sandbox provider.',
+      message: 'Development Demo simulation job queued.',
     };
   }
 
   public async getStatus(jobId: string): Promise<ProviderJobStatus> {
-    const job = this.jobs.get(jobId);
-    if (!job) {
+    const memoryJob = activeJobs.get(jobId);
+
+    // If memoryJob was lost due to serverless restart, parse encoded metadata from jobId
+    let startTime = memoryJob?.startTime;
+    let aspectRatio: AspectRatio = memoryJob?.aspectRatio || '9:16';
+    let duration = memoryJob?.duration || 25;
+    let uploadedPhoto = memoryJob?.uploadedPhoto || '';
+    let script = memoryJob?.script || '';
+    let voiceId = memoryJob?.voiceId || 'sw_ke_amina';
+
+    if (!startTime) {
+      const match = jobId.match(/^mock_demo_(\d+)_([0-9x]+)_(\d+)s/);
+      if (match) {
+        startTime = parseInt(match[1], 10);
+        aspectRatio = (match[2].replace('x', ':') as AspectRatio) || '9:16';
+        duration = parseInt(match[3], 10) || 25;
+      } else {
+        startTime = Date.now() - 10000; // default to completed if unparseable
+      }
+    }
+
+    if (memoryJob?.cancelled) {
       return {
-        phase: 'failed',
-        phaseLabel: 'Job not found',
+        phase: 'cancelled',
+        phaseLabel: 'Generation Cancelled',
         progressPercent: 0,
-        error: `Job ${jobId} not found in provider queue.`,
-      };
-    }
-    return job.status;
-  }
-
-  public async cancelJob(jobId: string): Promise<boolean> {
-    const job = this.jobs.get(jobId);
-    if (!job) return false;
-    if (job.status.phase === 'completed' || job.status.phase === 'failed') return false;
-
-    job.cancelled = true;
-    job.status = {
-      phase: 'cancelled',
-      phaseLabel: 'Generation cancelled',
-      progressPercent: 0,
-      details: 'Generation was aborted by user.',
-    };
-    return true;
-  }
-
-  private async runMockPipeline(jobId: string) {
-    const job = this.jobs.get(jobId);
-    if (!job) return;
-
-    const stages: Array<{ phase: ProviderJobStatus['phase']; label: string; details: string; percent: number; delayMs: number }> = [
-      { phase: 'preparing_script', label: 'Preparing script & phoneme tokens...', details: 'Analyzing phonetic pronunciation and sentence pauses...', percent: 18, delayMs: 1400 },
-      { phase: 'creating_voice', label: 'Synthesizing voice & acoustic cadence...', details: `Generating natural vocal track (${job.config.speakingSpeed}x speed, ${job.config.voiceId})...`, percent: 38, delayMs: 1600 },
-      { phase: 'generating_avatar', label: 'Synthesizing facial topology & eye contact...', details: 'Rendering natural eye blinking, micro-expressions and head tilting...', percent: 62, delayMs: 2000 },
-      { phase: 'rendering_video', label: 'Rendering lip synchronization & frames...', details: 'Aligning audio waveforms with viseme mouth geometry at 60fps...', percent: 85, delayMs: 2200 },
-      { phase: 'finalizing', label: 'Finalizing high-resolution output...', details: 'Applying color grading, studio lighting and caption alignment...', percent: 96, delayMs: 1200 },
-    ];
-
-    for (const stage of stages) {
-      await new Promise((r) => setTimeout(r, stage.delayMs));
-      const current = this.jobs.get(jobId);
-      if (!current || current.cancelled) return;
-
-      current.status = {
-        phase: stage.phase,
-        phaseLabel: stage.label,
-        progressPercent: stage.percent,
-        details: stage.details,
+        details: 'Simulation aborted by user.',
       };
     }
 
-    // Pipeline completed
-    const current = this.jobs.get(jobId);
-    if (!current || current.cancelled) return;
+    const elapsed = Date.now() - startTime;
 
-    const width = current.config.aspectRatio === '9:16' ? 1080 : current.config.aspectRatio === '1:1' ? 1080 : 1920;
-    const height = current.config.aspectRatio === '9:16' ? 1920 : current.config.aspectRatio === '1:1' ? 1080 : 1080;
-    const duration = Math.max(10, current.config.desiredDurationSeconds || 25);
+    // Progressive stage simulation
+    if (elapsed < 1400) {
+      return {
+        phase: 'preparing_script',
+        phaseLabel: 'Development Demo: Preparing script tokens...',
+        progressPercent: 18,
+        details: 'Calculating duration estimates and phonetic cadence for offline preview...',
+      };
+    }
 
-    // Reliable sample video URLs tailored for testing
-    // Using high quality video samples with presenter feel
-    const sampleVideos: Record<string, string> = {
-      '9:16': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      '16:9': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      '1:1': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    };
+    if (elapsed < 3200) {
+      return {
+        phase: 'creating_voice',
+        phaseLabel: 'Development Demo: Simulating vocal track cadence...',
+        progressPercent: 42,
+        details: `Simulating ${voiceId} acoustic synthesis without external API...`,
+      };
+    }
 
-    const videoUrl = sampleVideos[current.config.aspectRatio] || sampleVideos['16:9'];
-    const thumbnailUrl = current.config.uploadedPhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80';
+    if (elapsed < 5200) {
+      return {
+        phase: 'generating_avatar',
+        phaseLabel: 'Development Demo: Checking avatar image geometry...',
+        progressPercent: 68,
+        details: 'Verifying portrait boundaries and aspect ratio fit...',
+      };
+    }
+
+    if (elapsed < 7200) {
+      return {
+        phase: 'rendering_video',
+        phaseLabel: 'Development Demo: Simulating rendering pipeline...',
+        progressPercent: 88,
+        details: 'Running simulated pipeline frames (No third-party video API called)...',
+      };
+    }
+
+    // COMPLETED STATE: Strictly honest.
+    // videoUrl is intentionally empty ('') so the application NEVER substitutes
+    // unrelated stock cartoons or public videos (Big Buck Bunny, ForBiggerBlazes, etc.)
+    const width = aspectRatio === '9:16' ? 1080 : aspectRatio === '1:1' ? 1080 : 1920;
+    const height = aspectRatio === '9:16' ? 1920 : aspectRatio === '1:1' ? 1080 : 1080;
 
     const resultData: VideoResultData = {
       jobId,
-      videoUrl,
-      thumbnailUrl,
+      videoUrl: '', // NEVER return stock sample videos
+      thumbnailUrl: uploadedPhoto,
       durationSeconds: duration,
-      aspectRatio: current.config.aspectRatio,
+      aspectRatio,
       width,
       height,
-      fileSizeEstimate: `${(duration * 0.45).toFixed(1)} MB`,
-      generatedAt: new Date().toISOString(),
-      provider: 'Mock Development Sandbox (Simulation)',
+      fileSizeEstimate: `${(duration * 0.38).toFixed(1)} MB (simulated)`,
+      generatedAt: new Date(startTime).toISOString(),
+      provider: 'Development Demo (Offline Simulation)',
       isMock: true,
-      script: current.config.script,
-      voiceName: current.config.voiceId,
+      script,
+      voiceName: voiceId,
+      demoMessage: 'Development Demo — Real AI video generation is not connected.',
     };
 
-    current.status = {
+    return {
       phase: 'completed',
-      phaseLabel: 'Video Ready for Preview & Download',
+      phaseLabel: 'Development Demo Ready',
       progressPercent: 100,
-      details: 'All rendering stages completed in development sandbox.',
+      details: 'Development sandbox completed simulation without calling external APIs.',
       result: resultData,
     };
+  }
+
+  public async cancelJob(jobId: string): Promise<boolean> {
+    const job = activeJobs.get(jobId);
+    if (job) {
+      job.cancelled = true;
+      return true;
+    }
+    return true;
+  }
+
+  public async getResult(jobId: string): Promise<VideoResultData | null> {
+    const status = await this.getStatus(jobId);
+    return status.result || null;
   }
 }
